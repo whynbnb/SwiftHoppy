@@ -13,6 +13,8 @@
 		1A0000010000000000000004 /* SSHConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000110000000000000004 /* SSHConnectionStore.swift */; };
 		1A0000010000000000000005 /* RemoteSystemInfoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000110000000000000005 /* RemoteSystemInfoService.swift */; };
 		1A0000010000000000000006 /* AppPreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000110000000000000006 /* AppPreferencesStore.swift */; };
+		1A0000010000000000000007 /* SSHConfigImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000110000000000000007 /* SSHConfigImporter.swift */; };
+		1A0000010000000000000008 /* GlassStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000110000000000000008 /* GlassStyle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +24,8 @@
 		1A0000110000000000000004 /* SSHConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnectionStore.swift; sourceTree = "<group>"; };
 		1A0000110000000000000005 /* RemoteSystemInfoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSystemInfoService.swift; sourceTree = "<group>"; };
 		1A0000110000000000000006 /* AppPreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStore.swift; sourceTree = "<group>"; };
+		1A0000110000000000000007 /* SSHConfigImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfigImporter.swift; sourceTree = "<group>"; };
+		1A0000110000000000000008 /* GlassStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassStyle.swift; sourceTree = "<group>"; };
 		1A0000210000000000000001 /* SwiftHoppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftHoppy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -53,6 +57,8 @@
 				1A0000110000000000000004 /* SSHConnectionStore.swift */,
 				1A0000110000000000000005 /* RemoteSystemInfoService.swift */,
 				1A0000110000000000000006 /* AppPreferencesStore.swift */,
+				1A0000110000000000000007 /* SSHConfigImporter.swift */,
+				1A0000110000000000000008 /* GlassStyle.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -128,6 +134,8 @@
 				1A0000010000000000000004 /* SSHConnectionStore.swift in Sources */,
 				1A0000010000000000000005 /* RemoteSystemInfoService.swift in Sources */,
 				1A0000010000000000000006 /* AppPreferencesStore.swift in Sources */,
+				1A0000010000000000000007 /* SSHConfigImporter.swift in Sources */,
+				1A0000010000000000000008 /* GlassStyle.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

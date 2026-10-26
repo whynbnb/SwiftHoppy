@@ -1,112 +1,105 @@
 import SwiftUI
 
-// MARK: - Liquid Glass Theme
+// MARK: - Tokens
 
 enum GlassTheme {
-    static let cornerRadius: CGFloat = 24
+    static let controlRadius: CGFloat = 10
+    static let innerRadius: CGFloat = 14
+    static let cardRadius: CGFloat = 20
+    static let heroRadius: CGFloat = 24
 
+    /// Follow the system accent so controls keep their normal macOS colors.
     static func accent(for scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.47, green: 0.72, blue: 1.0)
-            : Color(red: 0.26, green: 0.49, blue: 0.98)
-    }
-
-    static func secondaryAccent(for scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.72, green: 0.52, blue: 1.0)
-            : Color(red: 0.55, green: 0.36, blue: 0.98)
-    }
-
-    static func mint(for scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.36, green: 0.88, blue: 0.78)
-            : Color(red: 0.16, green: 0.72, blue: 0.64)
+        _ = scheme
+        return .accentColor
     }
 }
 
-// MARK: - Background
+// MARK: - Backdrop
 
-/// Soft, diffuse backdrop that gives glass panels something colorful to refract.
-struct LiquidGlassBackground: View {
+/// Near-flat window backdrop with just enough vertical gradient to add depth.
+struct WindowBackdrop: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
+        LinearGradient(
+            colors: scheme == .dark
+                ? [
+                    Color(red: 0.135, green: 0.142, blue: 0.165),
+                    Color(red: 0.100, green: 0.106, blue: 0.124)
+                ]
+                : [
+                    Color(red: 0.975, green: 0.976, blue: 0.985),
+                    Color(red: 0.935, green: 0.940, blue: 0.955)
+                ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+}
 
-            LinearGradient(
-                colors: scheme == .dark
-                    ? [
-                        Color(red: 0.05, green: 0.06, blue: 0.10),
-                        Color(red: 0.08, green: 0.10, blue: 0.16),
-                        Color(red: 0.06, green: 0.07, blue: 0.12)
-                    ]
-                    : [
-                        Color(red: 0.97, green: 0.975, blue: 1.0),
-                        Color(red: 0.92, green: 0.945, blue: 1.0),
-                        Color(red: 0.965, green: 0.95, blue: 0.995)
-                    ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+// MARK: - Surfaces
 
-            GeometryReader { proxy in
-                ZStack {
-                    Circle()
-                        .fill(GlassTheme.accent(for: scheme).opacity(scheme == .dark ? 0.32 : 0.22))
-                        .frame(width: proxy.size.width * 1.0)
-                        .blur(radius: 150)
-                        .offset(x: -proxy.size.width * 0.28, y: -proxy.size.height * 0.30)
+/// Standard flat card surface: bright enough to separate from the background,
+/// with a hairline border and almost no shadow in dark mode.
+struct SurfaceCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    var cornerRadius: CGFloat = GlassTheme.cardRadius
+    var elevated: Bool = true
 
-                    Circle()
-                        .fill(GlassTheme.secondaryAccent(for: scheme).opacity(scheme == .dark ? 0.24 : 0.16))
-                        .frame(width: proxy.size.width * 0.9)
-                        .blur(radius: 160)
-                        .offset(x: proxy.size.width * 0.32, y: proxy.size.height * 0.32)
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
 
-                    Circle()
-                        .fill(GlassTheme.mint(for: scheme).opacity(scheme == .dark ? 0.16 : 0.12))
-                        .frame(width: proxy.size.width * 0.7)
-                        .blur(radius: 130)
-                        .offset(x: proxy.size.width * 0.10, y: -proxy.size.height * 0.05)
+    func body(content: Content) -> some View {
+        content
+            .background {
+                shape
+                    .fill(
+                        scheme == .dark
+                            ? Color(red: 0.172, green: 0.180, blue: 0.205)
+                            : Color(nsColor: .controlBackgroundColor)
+                    )
+                    .overlay {
+                        shape.fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(scheme == .dark ? 0.045 : 0.16),
+                                    Color.clear
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    }
+            }
+            .overlay {
+                shape.strokeBorder(
+                    Color.white.opacity(scheme == .dark ? 0.10 : 0.0),
+                    lineWidth: 0.8
+                )
+            }
+            .overlay {
+                if scheme != .dark {
+                    shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
                 }
             }
-        }
-        .ignoresSafeArea()
-    }
-}
-
-/// Slightly stronger sidebar material with a vertical sheen.
-struct GlassSidebarBackground: View {
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(scheme == .dark ? 0.07 : 0.30),
-                    Color.white.opacity(scheme == .dark ? 0.01 : 0.08),
-                    GlassTheme.accent(for: scheme).opacity(scheme == .dark ? 0.06 : 0.04)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
+            .clipShape(shape)
+            .shadow(
+                color: .black.opacity(scheme == .dark ? 0.28 : 0.05),
+                radius: elevated ? 10 : 0,
+                x: 0,
+                y: elevated ? 4 : 0
             )
-        }
-        .ignoresSafeArea()
     }
 }
 
-// MARK: - Glass Card
-
-struct GlassCardModifier: ViewModifier {
+/// Frosted surface reserved for the detail hero.
+struct GlassPanelModifier: ViewModifier {
     @Environment(\.colorScheme) private var scheme
-    var cornerRadius: CGFloat = GlassTheme.cornerRadius
+    var cornerRadius: CGFloat = GlassTheme.heroRadius
     var tint: Color = .clear
-    var elevated: Bool = true
-    var tintStrength: Double = 1.0
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -117,13 +110,11 @@ struct GlassCardModifier: ViewModifier {
             .background {
                 ZStack {
                     shape.fill(.ultraThinMaterial)
-
                     shape.fill(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(scheme == .dark ? 0.12 : 0.46),
-                                Color.white.opacity(scheme == .dark ? 0.03 : 0.16),
-                                tint.opacity((scheme == .dark ? 0.22 : 0.12) * tintStrength)
+                                Color.white.opacity(scheme == .dark ? 0.085 : 0.18),
+                                tint.opacity(scheme == .dark ? 0.07 : 0.04)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -135,68 +126,24 @@ struct GlassCardModifier: ViewModifier {
                 shape.strokeBorder(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(scheme == .dark ? 0.38 : 0.90),
-                            Color.white.opacity(scheme == .dark ? 0.06 : 0.28),
-                            Color.black.opacity(scheme == .dark ? 0.28 : 0.06)
+                            Color.white.opacity(scheme == .dark ? 0.18 : 0.50),
+                            Color.primary.opacity(0.06)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1
+                    lineWidth: 0.8
                 )
             }
-            .overlay(alignment: .topLeading) {
-                Capsule()
-                    .fill(Color.white.opacity(scheme == .dark ? 0.24 : 0.65))
-                    .frame(width: 120, height: 1.5)
-                    .blur(radius: 0.8)
-                    .padding(.top, 1)
-                    .padding(.leading, max(20, cornerRadius))
-                    .opacity(0.85)
-            }
             .clipShape(shape)
-            .compositingGroup()
-            .shadow(
-                color: .black.opacity(scheme == .dark ? 0.42 : 0.10),
-                radius: elevated ? 26 : 14,
-                x: 0,
-                y: elevated ? 14 : 7
-            )
-            .shadow(
-                color: .black.opacity(scheme == .dark ? 0.20 : 0.05),
-                radius: 2,
-                x: 0,
-                y: 1
-            )
+            .shadow(color: .black.opacity(scheme == .dark ? 0.20 : 0.06), radius: 12, x: 0, y: 5)
     }
 }
 
-extension View {
-    func glassCard(
-        cornerRadius: CGFloat = GlassTheme.cornerRadius,
-        tint: Color = .clear,
-        elevated: Bool = true,
-        tintStrength: Double = 1.0
-    ) -> some View {
-        modifier(
-            GlassCardModifier(
-                cornerRadius: cornerRadius,
-                tint: tint,
-                elevated: elevated,
-                tintStrength: tintStrength
-            )
-        )
-    }
-
-    /// Frosted chrome for small controls (menus, toggles, badges).
-    func glassControl(cornerRadius: CGFloat = 10) -> some View {
-        modifier(GlassControlModifier(cornerRadius: cornerRadius))
-    }
-}
-
+/// Small frosted control for the sidebar sort button.
 struct GlassControlModifier: ViewModifier {
     @Environment(\.colorScheme) private var scheme
-    var cornerRadius: CGFloat
+    var cornerRadius: CGFloat = GlassTheme.controlRadius
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -206,71 +153,98 @@ struct GlassControlModifier: ViewModifier {
         content
             .background {
                 shape.fill(.thinMaterial)
-                    .overlay(
-                        shape.fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(scheme == .dark ? 0.14 : 0.45),
-                                    Color.white.opacity(scheme == .dark ? 0.02 : 0.10)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                    )
+                    .overlay(shape.fill(Color.white.opacity(scheme == .dark ? 0.05 : 0.18)))
             }
             .overlay {
-                shape.strokeBorder(Color.white.opacity(scheme == .dark ? 0.18 : 0.55), lineWidth: 0.8)
+                shape.strokeBorder(Color.white.opacity(scheme == .dark ? 0.12 : 0.40), lineWidth: 0.8)
             }
             .clipShape(shape)
     }
 }
 
-// MARK: - Glass Logo Tile
+extension View {
+    func cardSurface(cornerRadius: CGFloat = GlassTheme.cardRadius, elevated: Bool = true) -> some View {
+        modifier(SurfaceCardModifier(cornerRadius: cornerRadius, elevated: elevated))
+    }
 
-struct GlassIconTile: View {
+    func glassPanel(cornerRadius: CGFloat = GlassTheme.heroRadius, tint: Color = .clear) -> some View {
+        modifier(GlassPanelModifier(cornerRadius: cornerRadius, tint: tint))
+    }
+
+    func glassControl(cornerRadius: CGFloat = GlassTheme.controlRadius) -> some View {
+        modifier(GlassControlModifier(cornerRadius: cornerRadius))
+    }
+}
+
+// MARK: - Small components
+
+/// Compact monochrome accent tile used in the hero.
+struct AccentGlyphTile: View {
     @Environment(\.colorScheme) private var scheme
     let systemName: String
-    var size: CGFloat = 64
+    var size: CGFloat = 56
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
         ZStack {
-            RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
+            shape
                 .fill(
                     LinearGradient(
                         colors: [
-                            GlassTheme.accent(for: scheme).opacity(scheme == .dark ? 0.55 : 0.35),
-                            GlassTheme.secondaryAccent(for: scheme).opacity(scheme == .dark ? 0.35 : 0.22)
+                            GlassTheme.accent(for: scheme).opacity(scheme == .dark ? 0.28 : 0.20),
+                            GlassTheme.accent(for: scheme).opacity(scheme == .dark ? 0.12 : 0.08)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .opacity(0.35)
-                )
-
-            RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(scheme == .dark ? 0.45 : 0.90),
-                            Color.white.opacity(0.05)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-
+            shape.strokeBorder(Color.white.opacity(scheme == .dark ? 0.18 : 0.45), lineWidth: 0.8)
             Image(systemName: systemName)
-                .font(.system(size: size * 0.42, weight: .semibold))
-                .foregroundStyle(.white.opacity(scheme == .dark ? 0.95 : 0.98))
-                .shadow(color: GlassTheme.accent(for: scheme).opacity(0.5), radius: 6, y: 2)
+                .font(.system(size: size * 0.40, weight: .semibold))
+                .foregroundStyle(GlassTheme.accent(for: scheme))
         }
         .frame(width: size, height: size)
-        .shadow(color: GlassTheme.accent(for: scheme).opacity(scheme == .dark ? 0.35 : 0.20), radius: 14, y: 6)
+    }
+}
+
+/// Lightweight ellipsis action used in card headers. No filled circle.
+struct CardMenuButton: View {
+    @Environment(\.colorScheme) private var scheme
+    @State private var isHovering = false
+    let content: () -> AnyView
+
+    init<Content: View>(@ViewBuilder content: @escaping () -> Content) {
+        self.content = { AnyView(content()) }
+    }
+
+    var body: some View {
+        Menu {
+            content()
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+                )
+                .contentShape(Rectangle())
+                .onHover { isHovering = $0 }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+}
+
+/// Section divider used between rows inside a card.
+struct HairlineDivider: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(scheme == .dark ? 0.08 : 0.06))
+            .frame(height: 0.8)
     }
 }

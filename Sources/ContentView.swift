@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var preferences: AppPreferencesStore
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var selectedID: SSHConnection.ID?
+    @State private var draggingConnectionID: SSHConnection.ID?
     @State private var errorMessage = ""
     @State private var showSSHConfigImporter = false
 
@@ -13,33 +14,20 @@ struct ContentView: View {
         preferences.text(chinese, english)
     }
 
-    private var selectableConnectionID: Binding<SSHConnection.ID?> {
-        Binding(
-            get: { selectedID },
-            set: { newValue in
-                guard let newValue else {
-                    selectedID = nil
-                    return
-                }
-                if let connection = store.connections.first(where: { $0.id == newValue }), !connection.isSeparator {
-                    selectedID = newValue
-                }
-            }
-        )
-    }
-
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
             ZStack {
-                GlassSidebarBackground()
+                Rectangle()
+                    .fill(.regularMaterial)
+                    .ignoresSafeArea()
 
                 Group {
                     if store.connections.isEmpty {
                         sidebarEmptyState
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        VStack(spacing: 8) {
-                            HStack(spacing: 8) {
+                        VStack(spacing: 6) {
+                            HStack(spacing: 6) {
                                 Menu {
                                     Button(t("手动", "Manual")) {
                                         preferences.setConnectionSortMode(.manual)
@@ -52,21 +40,25 @@ struct ContentView: View {
                                     }
                                 } label: {
                                     Label(sortModeLabel, systemImage: "arrow.up.arrow.down")
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .glassControl(cornerRadius: 9)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .padding(.horizontal, 8)
+                                        .frame(height: 26)
+                                        .glassControl(cornerRadius: 8)
                                 }
                                 .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .fixedSize()
 
-                                Toggle(isOn: Binding(
-                                    get: { preferences.hidesSensitiveInfo },
-                                    set: { preferences.setHidesSensitiveInfo($0) }
-                                )) {
+                                Button {
+                                    preferences.setHidesSensitiveInfo(!preferences.hidesSensitiveInfo)
+                                } label: {
                                     Image(systemName: preferences.hidesSensitiveInfo ? "eye.slash" : "eye")
-                                        .frame(width: 14)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 26, height: 26)
+                                        .contentShape(Rectangle())
                                 }
-                                .toggleStyle(.button)
-                                .frame(width: 32, height: 32)
+                                .buttonStyle(.borderless)
                                 .help(t("隐藏左侧栏中的 IP 等关键信息", "Hide IP and other sensitive details in the sidebar"))
 
                                 Spacer(minLength: 4)
@@ -76,6 +68,10 @@ struct ContentView: View {
                                         _ = store.addSeparator()
                                     } label: {
                                         Image(systemName: "line.3.horizontal")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 26, height: 26)
+                                            .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.borderless)
                                     .help(t("新增分割线", "Add Divider"))
@@ -84,94 +80,69 @@ struct ContentView: View {
                             .padding(.horizontal, 12)
                             .padding(.top, 8)
 
-                            List(selection: selectableConnectionID) {
-                                ForEach(sortedConnections) { connection in
-                                    if connection.isSeparator {
-                                        SidebarSeparatorRow()
+                            ScrollView {
+                                LazyVStack(spacing: 2) {
+                                    ForEach(Array(sortedConnections.enumerated()), id: \.element.id) { index, connection in
+                                        if connection.isSeparator {
+                                            SidebarDividerRow()
+                                                .contextMenu {
+                                                    Button(t("删除分割线", "Delete Divider"), role: .destructive) {
+                                                        deleteConnection(id: connection.id)
+                                                    }
+                                                }
+                                        } else {
+                                            SidebarConnectionRow(
+                                                connection: connection,
+                                                hostText: maskedHostText(for: connection),
+                                                isSelected: selectedID == connection.id,
+                                                status: updateStatus(for: connection)
+                                            )
+                                            .onTapGesture {
+                                                selectedID = connection.id
+                                            }
                                             .contextMenu {
-                                                Button(t("删除分割线", "Delete Divider"), role: .destructive) {
+                                                if preferences.connectionSortMode == .manual {
+                                                    Button(t("上移", "Move Up")) {
+                                                        moveVisibleItem(from: index, to: index - 1)
+                                                    }
+                                                    .disabled(index == 0)
+
+                                                    Button(t("下移", "Move Down")) {
+                                                        moveVisibleItem(from: index, to: index + 1)
+                                                    }
+                                                    .disabled(index >= sortedConnections.count - 1)
+
+                                                    Divider()
+                                                }
+
+                                                Button(t("删除", "Delete"), role: .destructive) {
                                                     deleteConnection(id: connection.id)
                                                 }
                                             }
-                                    } else {
-                                        let isSelected = selectedID == connection.id
-                                        HStack(alignment: .top, spacing: 10) {
-                                            ZStack {
-                                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                                    .fill(
-                                                        LinearGradient(
-                                                            colors: [
-                                                                Color.accentColor.opacity(isSelected ? 0.35 : 0.18),
-                                                                Color.accentColor.opacity(isSelected ? 0.18 : 0.08)
-                                                            ],
-                                                            startPoint: .topLeading,
-                                                            endPoint: .bottomTrailing
-                                                        )
-                                                    )
-                                                Image(systemName: connection.isLocal ? "desktopcomputer" : "server.rack")
-                                                    .font(.system(size: 12, weight: .semibold))
-                                                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                                            .onDrag {
+                                                draggingConnectionID = connection.id
+                                                return NSItemProvider(object: connection.id.uuidString as NSString)
                                             }
-                                            .frame(width: 26, height: 26)
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                                    .strokeBorder(Color.white.opacity(isSelected ? 0.35 : 0.15), lineWidth: 0.8)
+                                            .onDrop(
+                                                of: [.text],
+                                                delegate: SidebarConnectionDropDelegate(
+                                                    targetID: connection.id,
+                                                    draggingID: $draggingConnectionID,
+                                                    isManual: preferences.connectionSortMode == .manual,
+                                                    onMove: moveConnection
+                                                )
                                             )
-
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                HStack(spacing: 6) {
-                                                    Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
-                                                        .font(.headline)
-                                                        .foregroundStyle(.primary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.tail)
-
-                                                    Text(maskedHostText(for: connection))
-                                                        .font(.subheadline)
-                                                        .foregroundStyle(isSelected ? Color.primary.opacity(0.8) : Color.secondary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.middle)
-                                                }
-
-                                                if let latest = connection.latestSystemInfo,
-                                                   !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                    Text(latest.kernelVersion)
-                                                        .font(.caption)
-                                                        .foregroundStyle(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.78))
-                                                        .lineLimit(1)
-                                                }
-
-                                                if let status = updateStatus(for: connection) {
-                                                    HStack(spacing: 6) {
-                                                        Circle()
-                                                            .fill(status.color)
-                                                            .frame(width: 7, height: 7)
-
-                                                        Text(status.label)
-                                                            .font(.caption2)
-                                                            .foregroundStyle(isSelected ? Color.primary.opacity(0.82) : status.color)
-                                                            .lineLimit(1)
-                                                    }
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(
-                                                        Capsule(style: .continuous)
-                                                            .fill(isSelected ? Color.primary.opacity(0.10) : status.color.opacity(0.12))
-                                                    )
-                                                    .fixedSize(horizontal: true, vertical: false)
-                                                }
-                                            }
                                         }
-                                        .padding(.vertical, 4)
-                                        .tag(connection.id)
                                     }
                                 }
-                                .onDelete(perform: deleteConnections)
-                                .onMove(perform: preferences.connectionSortMode == .manual ? moveConnections : nil)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
                             }
-                            .listStyle(.sidebar)
-                            .scrollContentBackground(.hidden)
-                            .background(Color.clear)
+                            .onDeleteCommand {
+                                if let selectedID {
+                                    deleteConnection(id: selectedID)
+                                }
+                            }
                         }
                     }
                 }
@@ -267,40 +238,38 @@ struct ContentView: View {
     }
 
     private var sidebarEmptyState: some View {
-        VStack(spacing: 14) {
-            GlassIconTile(systemName: "tray.and.arrow.down", size: 58)
+        VStack(spacing: 10) {
+            Image(systemName: "tray.and.arrow.down")
+                .font(.system(size: 28, weight: .regular))
+                .foregroundStyle(.tertiary)
             Text(t("还没有连接记录", "No Connections Yet"))
-                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .font(.system(size: 14, weight: .semibold))
             Text(t("点击右上角新增，创建第一条 SSH 记录。", "Click Add in the top-right corner to create your first SSH record."))
-                .font(.callout)
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 200)
         }
-        .padding(26)
-        .glassCard(cornerRadius: 28)
-        .padding(18)
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var detailEmptyState: some View {
         ZStack {
-            LiquidGlassBackground()
+            WindowBackdrop()
 
-            VStack(spacing: 18) {
-                GlassIconTile(systemName: "server.rack", size: 76)
-
-                VStack(spacing: 8) {
-                    Text(t("未选择记录", "No Selection"))
-                        .font(.system(.title2, design: .rounded).weight(.semibold))
-                    Text(t("请选择左侧连接，或新建一条 SSH 记录开始管理。", "Pick a connection from the sidebar, or create a new SSH record to get started."))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 360)
-                }
+            VStack(spacing: 10) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(.tertiary)
+                Text(t("未选择记录", "No Selection"))
+                    .font(.system(size: 17, weight: .semibold))
+                Text(t("请选择左侧连接，或新建一条 SSH 记录开始管理。", "Pick a connection from the sidebar, or create a new SSH record to get started."))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
             }
-            .padding(40)
-            .glassCard(cornerRadius: 32)
         }
     }
 
@@ -377,16 +346,6 @@ struct ContentView: View {
         return prefix + String(repeating: "•", count: maskCount) + suffix
     }
 
-    private func deleteConnections(at offsets: IndexSet) {
-        let ids = offsets.compactMap { index in
-            sortedConnections.indices.contains(index) ? sortedConnections[index].id : nil
-        }
-        store.connections.removeAll { ids.contains($0.id) }
-        if let selectedID, ids.contains(selectedID) {
-            self.selectedID = store.firstSelectableID
-        }
-    }
-
     private func deleteConnection(id: SSHConnection.ID) {
         store.delete(id: id)
         if selectedID == id {
@@ -426,9 +385,25 @@ struct ContentView: View {
         }
     }
 
-    private func moveConnections(from source: IndexSet, to destination: Int) {
-        guard preferences.connectionSortMode == .manual else { return }
-        store.moveManually(from: source, to: destination)
+    private func moveVisibleItem(from index: Int, to destination: Int) {
+        guard preferences.connectionSortMode == .manual,
+              sortedConnections.indices.contains(index),
+              sortedConnections.indices.contains(destination) else { return }
+        store.moveManually(
+            from: IndexSet(integer: index),
+            to: destination > index ? destination + 1 : destination
+        )
+    }
+
+    private func moveConnection(id: SSHConnection.ID, before targetID: SSHConnection.ID) {
+        guard preferences.connectionSortMode == .manual,
+              let from = sortedConnections.firstIndex(where: { $0.id == id }),
+              let to = sortedConnections.firstIndex(where: { $0.id == targetID }),
+              from != to else { return }
+        store.moveManually(
+            from: IndexSet(integer: from),
+            to: to
+        )
     }
 
     private func compareHosts(_ lhs: String, _ rhs: String) -> Bool {
@@ -503,6 +478,7 @@ struct ContentView: View {
 
 struct ConnectionDetailView: View {
     @EnvironmentObject private var preferences: AppPreferencesStore
+    @Environment(\.colorScheme) private var colorScheme
     let connection: SSHConnection
     @State private var draft: SSHConnection
     @State private var isFetchingSystemInfo = false
@@ -522,7 +498,7 @@ struct ConnectionDetailView: View {
     let onOpen: (SSHConnection) -> Void
     let errorMessage: String
     let onDismissError: () -> Void
-    private let cardShadowOutset: CGFloat = 12
+
 
     init(
         connection: SSHConnection,
@@ -549,44 +525,33 @@ struct ConnectionDetailView: View {
 
     var body: some View {
         ZStack {
-            LiquidGlassBackground()
+            WindowBackdrop()
 
-            VStack(spacing: 18) {
+            VStack(spacing: 14) {
                 detailHero
 
-                HStack(alignment: .top, spacing: 18) {
+                HStack(alignment: .top, spacing: 16) {
                     ScrollView {
-                        VStack(spacing: 16) {
+                        VStack(spacing: 14) {
                             if let hardwareInfo = draft.hardwareInfo, hardwareInfo.hasVisibleContent {
                                 hardwareInfoCard(hardwareInfo)
                             }
-
-                            if draft.notesEntries.isEmpty {
-                                detailCard(title: t("备注", "Notes"), icon: "note.text") {
-                                    Text(t("暂无备注。", "No notes yet."))
-                                        .foregroundStyle(.secondary)
-                                }
-                            } else {
-                                ForEach(sortedNotes) { note in
-                                    noteCard(note)
-                                }
-                            }
+                            notesCard
                         }
-                        .padding(cardShadowOutset)
+                        .padding(.bottom, 8)
                     }
-                    .padding(-cardShadowOutset)
-                    .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                    .frame(minWidth: 320, idealWidth: 440, maxWidth: .infinity)
 
-                    VStack(alignment: .leading, spacing: 16) {
+                    ScrollView {
                         systemHistoryCard
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .padding(.bottom, 8)
                     }
-                    .frame(minWidth: 280, idealWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(minWidth: 280, idealWidth: 360, maxWidth: .infinity)
                 }
             }
-            .padding(20)
+            .padding(18)
         }
-        .navigationTitle(draft.displayName)
+        .navigationTitle("")
         .onChange(of: draft) { newValue in
             onSave(newValue)
         }
@@ -654,43 +619,44 @@ struct ConnectionDetailView: View {
     }
 
     private var detailHero: some View {
-        HStack(alignment: .center, spacing: 18) {
-            GlassIconTile(systemName: "terminal.fill", size: 64)
+        HStack(alignment: .center, spacing: 14) {
+            AccentGlyphTile(systemName: "terminal.fill", size: 52)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(draft.displayName.isEmpty ? draft.host : draft.displayName)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .tracking(-0.4)
+                    .font(.system(size: 24, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        Label(draft.isLocal ? t("本机", "Local") : (draft.host.isEmpty ? t("未填写主机", "No host") : draft.host), systemImage: draft.isLocal ? "desktopcomputer" : "server.rack")
-                        Label("\(t("端口", "Port")) \(draft.port)", systemImage: "shippingbox")
-                        if let latest = draft.latestSystemInfo {
-                            Label(latest.recordedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
-                            if !latest.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Label(latest.uptimeInfo, systemImage: "timer")
-                            }
+                HStack(spacing: 10) {
+                    heroMetaLabel(
+                        draft.isLocal ? t("本机", "Local") : (draft.host.isEmpty ? t("未填写主机", "No host") : draft.host),
+                        icon: draft.isLocal ? "desktopcomputer" : "server.rack"
+                    )
+                    heroMetaLabel("\(t("端口", "Port")) \(draft.port)", icon: "number")
+                    if let latest = draft.latestSystemInfo {
+                        heroMetaLabel(
+                            latest.recordedAt.formatted(date: .abbreviated, time: .shortened),
+                            icon: "clock"
+                        )
+                        if !latest.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            heroMetaLabel(latest.uptimeInfo, icon: "timer")
                         }
                     }
-
-                    Label(heroConnectionDetailText, systemImage: draft.isLocal ? "desktopcomputer" : "link")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
                 }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(minHeight: 48, alignment: .topLeading)
+                .monospacedDigit()
+
+                Text(heroConnectionDetailText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button(t("编辑信息", "Edit Info")) {
                     showConnectionEditor = true
                 }
@@ -705,7 +671,6 @@ struct ConnectionDetailView: View {
                     onOpen(draft)
                 }
                 .buttonStyle(.borderedProminent)
-                .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 3)
 
                 Menu {
                     if isFetchingHardwareInfo {
@@ -726,14 +691,26 @@ struct ConnectionDetailView: View {
                         onDelete()
                     }
                 } label: {
-                    Label(t("更多", "More"), systemImage: "ellipsis.circle")
+                    Label(t("更多", "More"), systemImage: "ellipsis")
                 }
+                .menuIndicator(.hidden)
             }
-            .controlSize(.large)
             .buttonBorderShape(.roundedRectangle)
+            .controlSize(.regular)
         }
-        .padding(20)
-        .glassCard(cornerRadius: 28, tint: .accentColor, tintStrength: 0.9)
+        .padding(16)
+        .glassPanel(cornerRadius: GlassTheme.heroRadius)
+    }
+
+    private func heroMetaLabel(_ text: String, icon: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
     }
 
     private var heroConnectionDetailText: String {
@@ -744,66 +721,102 @@ struct ConnectionDetailView: View {
         return draft.sshURL?.absoluteString ?? t("SSH 地址不可用", "SSH URL unavailable")
     }
 
-    private func detailCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: icon)
-                .font(.headline.weight(.semibold))
+    private func cardHeader<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder trailing: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
-
-            content()
+            Spacer(minLength: 8)
+            trailing()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassCard()
     }
 
-    private func noteCard(_ note: NoteEntry) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                Label(t("备注", "Note"), systemImage: "note.text")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Menu {
-                    Button(t("编辑", "Edit")) {
-                        editingNote = note
+    private var notesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardHeader(title: t("备注", "Notes"), icon: "note.text") {
+                HStack(spacing: 2) {
+                    Button {
+                        creatingNote = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 22)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.borderless)
 
-                    Button(t("删除", "Delete"), role: .destructive) {
-                        draft.notesEntries.removeAll { $0.id == note.id }
+                    CardMenuButton {
+                        Button(t("排序备注", "Sort Notes")) {
+                            showNoteSortEditor = true
+                        }
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
-                .menuStyle(.borderlessButton)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
 
-            Text(note.content)
-                .font(.body)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if sortedNotes.isEmpty {
+                Text(t("暂无备注。", "No notes yet."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            } else {
+                ForEach(Array(sortedNotes.enumerated()), id: \.element.id) { index, note in
+                    if index > 0 {
+                        HairlineDivider()
+                            .padding(.horizontal, 16)
+                    }
+                    noteRow(note)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassCard()
+        .cardSurface()
+    }
+
+    private func noteRow(_ note: NoteEntry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(note.content)
+                    .font(.system(size: 13))
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 10))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 4)
+
+            CardMenuButton {
+                Button(t("编辑", "Edit")) {
+                    editingNote = note
+                }
+                Button(t("删除", "Delete"), role: .destructive) {
+                    draft.notesEntries.removeAll { $0.id == note.id }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
     }
 
     private func hardwareInfoCard(_ info: HardwareInfo) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center) {
-                Label(t("硬件信息", "Hardware Info"), systemImage: "cpu")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Menu {
+        VStack(alignment: .leading, spacing: 14) {
+            cardHeader(title: t("硬件信息", "Hardware Info"), icon: "cpu") {
+                CardMenuButton {
                     if isFetchingHardwareInfo {
                         Button(t("取消", "Cancel"), role: .destructive) {
                             cancelHardwareFetch()
@@ -817,25 +830,22 @@ struct ConnectionDetailView: View {
                     Button(t("删除显示", "Remove Display"), role: .destructive) {
                         draft.hardwareInfo = nil
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
-                .menuStyle(.borderlessButton)
             }
 
             if !info.cpuModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("CPU")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
                     Text(info.cpuModel)
-                        .font(.title3.weight(.semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .lineLimit(2)
                         .textSelection(.enabled)
                 }
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 if !info.cpuCores.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     hardwareMetricCard(title: t("核心", "Cores"), value: info.cpuCores, icon: "cpu")
                 }
@@ -847,61 +857,71 @@ struct ConnectionDetailView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 if !info.osName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     hardwareDetailLine(title: t("系统", "System"), value: info.osName)
                 }
 
-                hardwareDetailLine(title: t("获取时间", "Read At"), value: info.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                hardwareDetailLine(
+                    title: t("获取时间", "Read At"),
+                    value: info.recordedAt.formatted(date: .abbreviated, time: .shortened)
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassCard(tint: .accentColor, tintStrength: 0.8)
+        .padding(16)
+        .cardSurface()
     }
 
     private func hardwareMetricCard(title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(GlassTheme.accent(for: colorScheme))
             Text(value)
-                .font(.title3.weight(.bold))
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .glassCard(cornerRadius: 16, tint: .accentColor, elevated: false, tintStrength: 0.7)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: GlassTheme.innerRadius, style: .continuous)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.075) : Color.black.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: GlassTheme.innerRadius, style: .continuous)
+                .strokeBorder(
+                    colorScheme == .dark ? Color.white.opacity(0.08) : Color.primary.opacity(0.05),
+                    lineWidth: 0.8
+                )
+        )
     }
 
     private func hardwareDetailLine(title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 54, alignment: .leading)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 56, alignment: .leading)
             Text(value)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var systemHistoryCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
-                Label(t("系统历史", "System History"), systemImage: "clock.arrow.circlepath")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Menu {
+        VStack(alignment: .leading, spacing: 0) {
+            cardHeader(title: t("系统历史", "System History"), icon: "clock.arrow.circlepath") {
+                CardMenuButton {
                     if isFetchingSystemInfo {
                         Button(t("取消读取", "Cancel Read"), role: .destructive) {
                             cancelSystemInfoFetch()
@@ -915,116 +935,108 @@ struct ConnectionDetailView: View {
                     Button(t("新建手填", "New Manual Entry")) {
                         creatingManualSnapshot = true
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
-                .menuStyle(.borderlessButton)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
 
             if draft.systemInfoHistory.isEmpty {
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     Image(systemName: "clock.badge.questionmark")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(.tertiary)
                     Text(t("暂无系统信息历史。", "No system history yet."))
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 240)
+                .frame(maxWidth: .infinity, minHeight: 150)
+                .padding(.bottom, 8)
             } else {
-                ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }) { snapshot in
-                            snapshotCard(snapshot: snapshot)
-                                .contextMenu {
-                                    Button(t("编辑", "Edit")) {
-                                        editingSnapshot = snapshot
-                                    }
-                                    Button(t("删除", "Delete"), role: .destructive) {
-                                        deleteSnapshot(id: snapshot.id)
-                                    }
-                                }
-                        }
+                let sorted = draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }
+                ForEach(Array(sorted.enumerated()), id: \.element.id) { index, snapshot in
+                    if index > 0 {
+                        HairlineDivider()
+                            .padding(.horizontal, 16)
                     }
-                    .padding(cardShadowOutset)
+                    snapshotRow(snapshot)
+                        .contextMenu {
+                            Button(t("编辑", "Edit")) {
+                                editingSnapshot = snapshot
+                            }
+                            Button(t("删除", "Delete"), role: .destructive) {
+                                deleteSnapshot(id: snapshot.id)
+                            }
+                        }
                 }
-                .padding(-cardShadowOutset)
+                .padding(.bottom, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassCard()
+        .cardSurface()
     }
 
-    private func detailSummaryRow(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func modernField<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            content()
-                .textFieldStyle(.plain)
-                .font(.subheadline)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
-                )
-        }
-    }
-
-    private func snapshotCard(snapshot: SystemInfoSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+    private func snapshotRow(_ snapshot: SystemInfoSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
                 Text(snapshot.recordedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
-                Spacer()
+
+                Spacer(minLength: 4)
 
                 if snapshot.isManualEntry {
-                    Text(t("手填", "Manual"))
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(0.12), in: Capsule())
-                        .foregroundStyle(Color.blue)
+                    historyBadge(t("手填", "Manual"), color: .blue)
                 }
 
                 if snapshot.isEdited {
-                    Text(t("已编辑", "Edited"))
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.purple.opacity(0.12), in: Capsule())
-                        .foregroundStyle(Color.purple)
+                    historyBadge(t("已编辑", "Edited"), color: .purple)
                 }
             }
 
-            detailSummaryRow(title: t("内核版本", "Kernel Version"), value: snapshot.kernelVersion.isEmpty ? "-" : snapshot.kernelVersion)
-            detailSummaryRow(
-                title: t("最后更新信息", "Last Update Info"),
+            historyField(
+                title: t("内核", "Kernel"),
+                value: snapshot.kernelVersion.isEmpty ? "-" : snapshot.kernelVersion
+            )
+            historyField(
+                title: t("最后更新", "Last update"),
                 value: snapshot.updateInfo.isEmpty
                     ? t("未检测到更新信息", "No update info detected")
                     : snapshot.updateInfo
             )
 
             if !snapshot.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                detailSummaryRow(title: t("运行时间", "Uptime"), value: snapshot.uptimeInfo)
+                historyField(title: t("运行", "Uptime"), value: snapshot.uptimeInfo)
             }
         }
-        .padding(10)
-        .glassCard(cornerRadius: 16, elevated: false, tintStrength: 0.4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+    }
+
+    private func historyField(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 62, alignment: .leading)
+
+            Text(value)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func historyBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+            .foregroundStyle(color.opacity(0.9))
     }
 
     private func refreshRemoteSystemInfo() {
@@ -1253,8 +1265,6 @@ struct ConnectionInfoEditorView: View {
                 }
             }
             .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .background { LiquidGlassBackground() }
             .frame(width: 580, height: 640)
             .navigationTitle(t("编辑信息", "Edit Info"))
             .toolbar {
@@ -1388,7 +1398,6 @@ struct SSHConfigImportView: View {
             }
             .padding()
             .frame(width: 560, height: 520)
-            .background { LiquidGlassBackground() }
             .navigationTitle(t("导入 SSH Config", "Import SSH Config"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1477,7 +1486,6 @@ struct NoteEditorView: View {
             }
             .padding()
             .frame(width: 560, height: 360)
-            .background { LiquidGlassBackground() }
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1539,7 +1547,6 @@ struct NoteSortEditorView: View {
             }
             .padding()
             .frame(width: 560, height: 480)
-            .background { LiquidGlassBackground() }
             .navigationTitle(t("排序备注", "Sort Notes"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1622,8 +1629,6 @@ struct SystemHistoryEditorView: View {
                 }
             }
             .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .background { LiquidGlassBackground() }
             .frame(width: 520, height: 380)
             .navigationTitle(title)
             .toolbar {
@@ -1667,13 +1672,13 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            LiquidGlassBackground()
+            WindowBackdrop()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
                     Text(t("设置", "Settings"))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .tracking(-0.5)
+                        .font(.system(size: 24, weight: .semibold))
+                        .padding(.bottom, 2)
 
                     settingsCard(title: t("外观与语言", "Appearance & Language"), icon: "paintbrush.pointed.fill") {
                         Picker(t("语言", "Language"), selection: Binding(
@@ -1763,8 +1768,12 @@ struct SettingsView: View {
                                         }
                                         Spacer()
                                     }
-                                    .padding(12)
-                                    .glassCard(cornerRadius: 16, elevated: false, tintStrength: 0.4)
+                                    .padding(.horizontal, 11)
+                                    .padding(.vertical, 9)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: GlassTheme.innerRadius, style: .continuous)
+                                            .fill(Color.primary.opacity(0.035))
+                                    )
                                 }
                             }
                         }
@@ -1798,7 +1807,7 @@ struct SettingsView: View {
                 .padding(22)
             }
         }
-        .frame(width: 720, height: 640)
+        .frame(width: 700, height: 620)
         .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
             get: {
                 !settingsErrorMessage.isEmpty
@@ -1870,14 +1879,19 @@ struct SettingsView: View {
     }
 
     private func settingsCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: icon)
-                .font(.headline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+            }
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassCard()
+        .padding(16)
+        .cardSurface()
     }
 
     private func exportConnections() {
@@ -2032,7 +2046,6 @@ struct ImportPreviewSheet: View {
             }
             .padding()
             .frame(width: 520, height: 520)
-            .background { LiquidGlassBackground() }
             .navigationTitle(t("导入预览", "Import Preview"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2049,21 +2062,116 @@ struct ImportPreviewSheet: View {
     }
 }
 
-private struct SidebarSeparatorRow: View {
+private struct SidebarConnectionRow: View {
+    @Environment(\.colorScheme) private var scheme
+
+    let connection: SSHConnection
+    let hostText: String
+    let isSelected: Bool
+    let status: (label: String, color: Color)?
+
+    @State private var isHovering = false
+
+    private var accent: Color {
+        GlassTheme.accent(for: scheme)
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(height: 1)
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(accent)
+                .frame(width: 3, height: 22)
+                .opacity(isSelected ? 1 : 0)
 
-            Image(systemName: "line.3.horizontal")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-            Rectangle()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(height: 1)
+                    Text(hostText)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                if let latest = connection.latestSystemInfo,
+                   !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(latest.kernelVersion)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if let status {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(status.color)
+                        .frame(width: 5.5, height: 5.5)
+                    Text(status.label)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .fixedSize()
+            }
         }
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: GlassTheme.controlRadius, style: .continuous)
+                .fill(
+                    isSelected
+                        ? accent.opacity(scheme == .dark ? 0.16 : 0.12)
+                        : (isHovering ? Color.primary.opacity(0.04) : Color.clear)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: GlassTheme.controlRadius, style: .continuous)
+                .strokeBorder(isSelected ? accent.opacity(0.28) : Color.clear, lineWidth: 0.8)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: GlassTheme.controlRadius, style: .continuous))
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: isSelected)
+    }
+}
+
+private struct SidebarDividerRow: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(scheme == .dark ? 0.10 : 0.08))
+            .frame(height: 0.8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+    }
+}
+
+private struct SidebarConnectionDropDelegate: DropDelegate {
+    let targetID: SSHConnection.ID
+    @Binding var draggingID: SSHConnection.ID?
+    let isManual: Bool
+    let onMove: (SSHConnection.ID, SSHConnection.ID) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard isManual, let draggingID, draggingID != targetID else { return }
+        onMove(draggingID, targetID)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: isManual ? .move : .cancel)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingID = nil
+        return isManual
     }
 }
