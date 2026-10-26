@@ -31,9 +31,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
             ZStack {
-                Rectangle()
-                    .fill(.regularMaterial)
-                    .ignoresSafeArea()
+                GlassSidebarBackground()
 
                 Group {
                     if store.connections.isEmpty {
@@ -56,10 +54,7 @@ struct ContentView: View {
                                     Label(sortModeLabel, systemImage: "arrow.up.arrow.down")
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                .fill(Color.primary.opacity(0.06))
-                                        )
+                                        .glassControl(cornerRadius: 9)
                                 }
                                 .menuStyle(.borderlessButton)
 
@@ -100,47 +95,71 @@ struct ContentView: View {
                                             }
                                     } else {
                                         let isSelected = selectedID == connection.id
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack(spacing: 6) {
-                                                Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
-                                                    .font(.headline)
-                                                    .foregroundStyle(isSelected ? .primary : .primary)
-                                                    .lineLimit(1)
-                                                    .truncationMode(.tail)
-
-                                                Text(maskedHostText(for: connection))
-                                                    .font(.subheadline)
-                                                    .foregroundStyle(isSelected ? Color.primary.opacity(0.8) : Color.secondary)
-                                                    .lineLimit(1)
-                                                    .truncationMode(.middle)
+                                        HStack(alignment: .top, spacing: 10) {
+                                            ZStack {
+                                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                                    .fill(
+                                                        LinearGradient(
+                                                            colors: [
+                                                                Color.accentColor.opacity(isSelected ? 0.35 : 0.18),
+                                                                Color.accentColor.opacity(isSelected ? 0.18 : 0.08)
+                                                            ],
+                                                            startPoint: .topLeading,
+                                                            endPoint: .bottomTrailing
+                                                        )
+                                                    )
+                                                Image(systemName: connection.isLocal ? "desktopcomputer" : "server.rack")
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                                             }
+                                            .frame(width: 26, height: 26)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                                    .strokeBorder(Color.white.opacity(isSelected ? 0.35 : 0.15), lineWidth: 0.8)
+                                            )
 
-                                            if let latest = connection.latestSystemInfo,
-                                               !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                Text(latest.kernelVersion)
-                                                    .font(.caption)
-                                                    .foregroundStyle(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.78))
-                                                    .lineLimit(1)
-                                            }
-
-                                            if let status = updateStatus(for: connection) {
+                                            VStack(alignment: .leading, spacing: 4) {
                                                 HStack(spacing: 6) {
-                                                    Circle()
-                                                        .fill(status.color)
-                                                        .frame(width: 7, height: 7)
+                                                    Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
+                                                        .font(.headline)
+                                                        .foregroundStyle(.primary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.tail)
 
-                                                    Text(status.label)
-                                                        .font(.caption2)
-                                                        .foregroundStyle(isSelected ? Color.primary.opacity(0.82) : status.color)
+                                                    Text(maskedHostText(for: connection))
+                                                        .font(.subheadline)
+                                                        .foregroundStyle(isSelected ? Color.primary.opacity(0.8) : Color.secondary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                }
+
+                                                if let latest = connection.latestSystemInfo,
+                                                   !latest.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                    Text(latest.kernelVersion)
+                                                        .font(.caption)
+                                                        .foregroundStyle(isSelected ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.78))
                                                         .lineLimit(1)
                                                 }
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(
-                                                    Capsule(style: .continuous)
-                                                        .fill(isSelected ? Color.primary.opacity(0.10) : status.color.opacity(0.12))
-                                                )
-                                                .fixedSize(horizontal: true, vertical: false)
+
+                                                if let status = updateStatus(for: connection) {
+                                                    HStack(spacing: 6) {
+                                                        Circle()
+                                                            .fill(status.color)
+                                                            .frame(width: 7, height: 7)
+
+                                                        Text(status.label)
+                                                            .font(.caption2)
+                                                            .foregroundStyle(isSelected ? Color.primary.opacity(0.82) : status.color)
+                                                            .lineLimit(1)
+                                                    }
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(
+                                                        Capsule(style: .continuous)
+                                                            .fill(isSelected ? Color.primary.opacity(0.10) : status.color.opacity(0.12))
+                                                    )
+                                                    .fixedSize(horizontal: true, vertical: false)
+                                                }
                                             }
                                         }
                                         .padding(.vertical, 4)
@@ -249,34 +268,39 @@ struct ContentView: View {
 
     private var sidebarEmptyState: some View {
         VStack(spacing: 14) {
-            Image(systemName: "tray.and.arrow.down")
-                .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(.secondary)
+            GlassIconTile(systemName: "tray.and.arrow.down", size: 58)
             Text(t("还没有连接记录", "No Connections Yet"))
-                .font(.title3.weight(.semibold))
+                .font(.system(.title3, design: .rounded).weight(.semibold))
             Text(t("点击右上角新增，创建第一条 SSH 记录。", "Click Add in the top-right corner to create your first SSH record."))
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .frame(maxWidth: 220)
         }
+        .padding(26)
+        .glassCard(cornerRadius: 28)
+        .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var detailEmptyState: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            .ignoresSafeArea()
+            LiquidGlassBackground()
 
-            VStack(spacing: 14) {
-                Image(systemName: "server.rack")
-                    .font(.system(size: 54, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text(t("未选择记录", "No Selection"))
-                    .font(.title2.weight(.semibold))
-                Text(t("请选择左侧连接，或新建一条 SSH 记录开始管理。", "Pick a connection from the sidebar, or create a new SSH record to get started."))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
+            VStack(spacing: 18) {
+                GlassIconTile(systemName: "server.rack", size: 76)
+
+                VStack(spacing: 8) {
+                    Text(t("未选择记录", "No Selection"))
+                        .font(.system(.title2, design: .rounded).weight(.semibold))
+                    Text(t("请选择左侧连接，或新建一条 SSH 记录开始管理。", "Pick a connection from the sidebar, or create a new SSH record to get started."))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
+                }
             }
+            .padding(40)
+            .glassCard(cornerRadius: 32)
         }
     }
 
@@ -525,8 +549,7 @@ struct ConnectionDetailView: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            .ignoresSafeArea()
+            LiquidGlassBackground()
 
             VStack(spacing: 18) {
                 detailHero
@@ -631,19 +654,15 @@ struct ConnectionDetailView: View {
     }
 
     private var detailHero: some View {
-        HStack(alignment: .center, spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.primary.opacity(0.08))
-                Image(systemName: "terminal.fill")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-            .frame(width: 64, height: 64)
+        HStack(alignment: .center, spacing: 18) {
+            GlassIconTile(systemName: "terminal.fill", size: 64)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(draft.displayName.isEmpty ? draft.host : draft.displayName)
-                    .font(.largeTitle.weight(.bold))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .tracking(-0.4)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
@@ -675,15 +694,18 @@ struct ConnectionDetailView: View {
                 Button(t("编辑信息", "Edit Info")) {
                     showConnectionEditor = true
                 }
+                .buttonStyle(.bordered)
 
                 Button(t("添加备注", "Add Note")) {
                     creatingNote = true
                 }
+                .buttonStyle(.bordered)
 
                 Button(draft.isLocal ? t("打开终端", "Open Terminal") : t("打开 SSH", "Open SSH")) {
                     onOpen(draft)
                 }
                 .buttonStyle(.borderedProminent)
+                .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 3)
 
                 Menu {
                     if isFetchingHardwareInfo {
@@ -707,16 +729,11 @@ struct ConnectionDetailView: View {
                     Label(t("更多", "More"), systemImage: "ellipsis.circle")
                 }
             }
+            .controlSize(.large)
+            .buttonBorderShape(.roundedRectangle)
         }
         .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08))
-        )
+        .glassCard(cornerRadius: 28, tint: .accentColor, tintStrength: 0.9)
     }
 
     private var heroConnectionDetailText: String {
@@ -737,15 +754,7 @@ struct ConnectionDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08))
-        )
-        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
+        .glassCard()
     }
 
     private func noteCard(_ note: NoteEntry) -> some View {
@@ -782,15 +791,7 @@ struct ConnectionDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08))
-        )
-        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
+        .glassCard()
     }
 
     private func hardwareInfoCard(_ info: HardwareInfo) -> some View {
@@ -856,15 +857,7 @@ struct ConnectionDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.18))
-        )
-        .shadow(color: .black.opacity(0.05), radius: 12, x: 0, y: 5)
+        .glassCard(tint: .accentColor, tintStrength: 0.8)
     }
 
     private func hardwareMetricCard(title: String, value: String, icon: String) -> some View {
@@ -882,10 +875,7 @@ struct ConnectionDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.accentColor.opacity(0.08))
-        )
+        .glassCard(cornerRadius: 16, tint: .accentColor, elevated: false, tintStrength: 0.7)
     }
 
     private func hardwareDetailLine(title: String, value: String) -> some View {
@@ -962,15 +952,7 @@ struct ConnectionDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08))
-        )
-        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 4)
+        .glassCard()
     }
 
     private func detailSummaryRow(title: String, value: String) -> some View {
@@ -1042,14 +1024,7 @@ struct ConnectionDetailView: View {
             }
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06))
-        )
+        .glassCard(cornerRadius: 16, elevated: false, tintStrength: 0.4)
     }
 
     private func refreshRemoteSystemInfo() {
@@ -1278,6 +1253,8 @@ struct ConnectionInfoEditorView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background { LiquidGlassBackground() }
             .frame(width: 580, height: 640)
             .navigationTitle(t("编辑信息", "Edit Info"))
             .toolbar {
@@ -1411,6 +1388,7 @@ struct SSHConfigImportView: View {
             }
             .padding()
             .frame(width: 560, height: 520)
+            .background { LiquidGlassBackground() }
             .navigationTitle(t("导入 SSH Config", "Import SSH Config"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1499,6 +1477,7 @@ struct NoteEditorView: View {
             }
             .padding()
             .frame(width: 560, height: 360)
+            .background { LiquidGlassBackground() }
             .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1560,6 +1539,7 @@ struct NoteSortEditorView: View {
             }
             .padding()
             .frame(width: 560, height: 480)
+            .background { LiquidGlassBackground() }
             .navigationTitle(t("排序备注", "Sort Notes"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1642,6 +1622,8 @@ struct SystemHistoryEditorView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background { LiquidGlassBackground() }
             .frame(width: 520, height: 380)
             .navigationTitle(title)
             .toolbar {
@@ -1685,13 +1667,13 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            .ignoresSafeArea()
+            LiquidGlassBackground()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(t("设置", "Settings"))
-                        .font(.largeTitle.weight(.bold))
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .tracking(-0.5)
 
                     settingsCard(title: t("外观与语言", "Appearance & Language"), icon: "paintbrush.pointed.fill") {
                         Picker(t("语言", "Language"), selection: Binding(
@@ -1782,10 +1764,7 @@ struct SettingsView: View {
                                         Spacer()
                                     }
                                     .padding(12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .fill(Color.primary.opacity(0.04))
-                                    )
+                                    .glassCard(cornerRadius: 16, elevated: false, tintStrength: 0.4)
                                 }
                             }
                         }
@@ -1819,7 +1798,7 @@ struct SettingsView: View {
                 .padding(22)
             }
         }
-        .frame(width: 640, height: 560)
+        .frame(width: 720, height: 640)
         .alert(t("操作失败", "Operation Failed"), isPresented: Binding(
             get: {
                 !settingsErrorMessage.isEmpty
@@ -1898,14 +1877,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08))
-        )
+        .glassCard()
     }
 
     private func exportConnections() {
@@ -2060,6 +2032,7 @@ struct ImportPreviewSheet: View {
             }
             .padding()
             .frame(width: 520, height: 520)
+            .background { LiquidGlassBackground() }
             .navigationTitle(t("导入预览", "Import Preview"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2073,47 +2046,6 @@ struct ImportPreviewSheet: View {
                 }
             }
         }
-    }
-}
-
-private struct ConnectionRowView: View {
-    let connection: SSHConnection
-    let isSelected: Bool
-    let subtitle: String
-
-    var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.06))
-                Image(systemName: "terminal")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
-            }
-            .frame(width: 42, height: 42)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(connection.displayName.isEmpty ? connection.host : connection.displayName)
-                    .font(.headline)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer()
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
-        )
-        .shadow(color: .black.opacity(isSelected ? 0.06 : 0.03), radius: isSelected ? 10 : 6, x: 0, y: 4)
-        .foregroundStyle(.primary)
     }
 }
 
