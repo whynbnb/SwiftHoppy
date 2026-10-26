@@ -476,6 +476,48 @@ struct ContentView: View {
     }
 }
 
+private enum HistoryGrouping {
+    case session
+    case time
+}
+
+private struct HistoryEventRow: Identifiable {
+    let snapshot: SystemInfoSnapshot
+    let isReboot: Bool
+    let isKernelChange: Bool
+    let isUpdateChange: Bool
+    let previousKernel: String?
+
+    var id: UUID { snapshot.id }
+}
+
+private struct HistoryTimeDay: Identifiable {
+    let id: Date
+    let rows: [HistoryEventRow]
+}
+
+private struct HistoryBootSession: Identifiable {
+    let id: UUID
+    /// Newest first.
+    let snapshots: [SystemInfoSnapshot]
+    let boundaryReboot: Bool
+    let boundaryKernelChange: Bool
+
+    var newest: SystemInfoSnapshot { snapshots[0] }
+    var oldest: SystemInfoSnapshot { snapshots[snapshots.count - 1] }
+    var kernel: String {
+        snapshots.first {
+            !$0.kernelVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }?.kernelVersion ?? newest.kernelVersion
+    }
+    var latestUptime: String {
+        snapshots.first {
+            !$0.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }?.uptimeInfo ?? ""
+    }
+    var count: Int { snapshots.count }
+}
+
 struct ConnectionDetailView: View {
     @EnvironmentObject private var preferences: AppPreferencesStore
     @Environment(\.colorScheme) private var colorScheme
@@ -492,6 +534,7 @@ struct ConnectionDetailView: View {
     @State private var editingNote: NoteEntry?
     @State private var editingSnapshot: SystemInfoSnapshot?
     @State private var creatingManualSnapshot = false
+    @State private var historyGrouping: HistoryGrouping = .time
     let installedApps: [InstalledTerminalApp]
     let onSave: (SSHConnection) -> Void
     let onDelete: () -> Void
@@ -921,19 +964,23 @@ struct ConnectionDetailView: View {
     private var systemHistoryCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             cardHeader(title: t("系统历史", "System History"), icon: "clock.arrow.circlepath") {
-                CardMenuButton {
-                    if isFetchingSystemInfo {
-                        Button(t("取消读取", "Cancel Read"), role: .destructive) {
-                            cancelSystemInfoFetch()
-                        }
-                    } else {
-                        Button(draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH")) {
-                            refreshRemoteSystemInfo()
-                        }
-                    }
+                HStack(spacing: 5) {
+                    historyGroupingToggle
 
-                    Button(t("新建手填", "New Manual Entry")) {
-                        creatingManualSnapshot = true
+                    CardMenuButton {
+                        if isFetchingSystemInfo {
+                            Button(t("取消读取", "Cancel Read"), role: .destructive) {
+                                cancelSystemInfoFetch()
+                            }
+                        } else {
+                            Button(draft.isLocal ? t("读取本机信息", "Read Local Info") : t("通过 SSH 读取", "Read via SSH")) {
+                                refreshRemoteSystemInfo()
+                            }
+                        }
+
+                        Button(t("新建手填", "New Manual Entry")) {
+                            creatingManualSnapshot = true
+                        }
                     }
                 }
             }
@@ -953,65 +1000,522 @@ struct ConnectionDetailView: View {
                 .frame(maxWidth: .infinity, minHeight: 150)
                 .padding(.bottom, 8)
             } else {
-                let sorted = draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }
-                ForEach(Array(sorted.enumerated()), id: \.element.id) { index, snapshot in
-                    if index > 0 {
-                        HairlineDivider()
-                            .padding(.horizontal, 16)
-                    }
-                    snapshotRow(snapshot)
-                        .contextMenu {
-                            Button(t("编辑", "Edit")) {
-                                editingSnapshot = snapshot
-                            }
-                            Button(t("删除", "Delete"), role: .destructive) {
-                                deleteSnapshot(id: snapshot.id)
-                            }
-                        }
-                }
-                .padding(.bottom, 6)
+                historyContent
+                    .padding(.bottom, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
     }
 
-    private func snapshotRow(_ snapshot: SystemInfoSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Text(snapshot.recordedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 10, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 4)
-
-                if snapshot.isManualEntry {
-                    historyBadge(t("手填", "Manual"), color: .blue)
-                }
-
-                if snapshot.isEdited {
-                    historyBadge(t("已编辑", "Edited"), color: .purple)
-                }
-            }
-
-            historyField(
-                title: t("内核", "Kernel"),
-                value: snapshot.kernelVersion.isEmpty ? "-" : snapshot.kernelVersion
+    private var historyGroupingToggle: some View {
+        HStack(spacing: 1) {
+            historyGroupingButton(
+                .session,
+                systemImage: "power",
+                help: t("按开机会话", "By boot session")
             )
-            historyField(
-                title: t("最后更新", "Last update"),
-                value: snapshot.updateInfo.isEmpty
-                    ? t("未检测到更新信息", "No update info detected")
-                    : snapshot.updateInfo
+            historyGroupingButton(
+                .time,
+                systemImage: "calendar",
+                help: t("按时间", "By time")
             )
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
+    }
 
-            if !snapshot.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                historyField(title: t("运行", "Uptime"), value: snapshot.uptimeInfo)
+    private func historyGroupingButton(
+        _ mode: HistoryGrouping,
+        systemImage: String,
+        help: String
+    ) -> some View {
+        Button {
+            historyGrouping = mode
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(historyGrouping == mode ? Color.primary : Color.secondary)
+                .frame(width: 20, height: 17)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(historyGrouping == mode ? Color.primary.opacity(0.09) : Color.clear)
+                )
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+    }
+
+    @ViewBuilder
+    private var historyContent: some View {
+        switch historyGrouping {
+        case .session:
+            sessionHistoryView
+        case .time:
+            timeHistoryView
+        }
+    }
+
+    @ViewBuilder
+    private var sessionHistoryView: some View {
+        let sessions = historySessions()
+        VStack(spacing: 0) {
+            ForEach(Array(sessions.enumerated()), id: \.offset) { sessionIndex, session in
+                if sessionIndex > 0 {
+                    HairlineDivider()
+                        .padding(.horizontal, 16)
+                }
+                historySessionHeader(session)
+                ForEach(Array(session.snapshots.enumerated()), id: \.offset) { index, snapshot in
+                    historySessionRow(
+                        session,
+                        snapshot: snapshot,
+                        isFirst: index == 0,
+                        isLast: index == session.snapshots.count - 1
+                    )
+                    .contextMenu {
+                        historyContextMenu(snapshot)
+                    }
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private var timeHistoryView: some View {
+        let days = historyTimeDays()
+        VStack(spacing: 0) {
+            ForEach(Array(days.enumerated()), id: \.offset) { dayIndex, day in
+                if dayIndex > 0 {
+                    HairlineDivider()
+                        .padding(.horizontal, 16)
+                }
+                historyTimeDayHeader(day)
+                ForEach(Array(day.rows.enumerated()), id: \.offset) { index, row in
+                    historyTimeRow(
+                        row,
+                        isFirst: index == 0,
+                        isLast: index == day.rows.count - 1
+                    )
+                    .contextMenu {
+                        historyContextMenu(row.snapshot)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func historyContextMenu(_ snapshot: SystemInfoSnapshot) -> some View {
+        Button(t("编辑", "Edit")) {
+            editingSnapshot = snapshot
+        }
+        Button(t("删除", "Delete"), role: .destructive) {
+            deleteSnapshot(id: snapshot.id)
+        }
+    }
+
+    // MARK: System history grouping
+
+    // MARK: Boot sessions
+
+    private func historySessions() -> [HistoryBootSession] {
+        let sorted = draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }
+        var grouped: [[SystemInfoSnapshot]] = []
+
+        for snapshot in sorted {
+            if let index = grouped.indices.last,
+               let existingOldest = grouped[index].last,
+               isSameBoot(existingOldest: existingOldest, candidateOlder: snapshot) {
+                grouped[index].append(snapshot)
+            } else {
+                grouped.append([snapshot])
+            }
+        }
+
+        return grouped.indices.map { index in
+            let snapshots = grouped[index]
+            let olderSessionNewest = index + 1 < grouped.count ? grouped[index + 1].first : nil
+            let oldest = snapshots[snapshots.count - 1]
+
+            return HistoryBootSession(
+                id: snapshots[0].id,
+                snapshots: snapshots,
+                boundaryReboot: olderSessionNewest.map {
+                    isRebootDetected(newer: oldest, older: $0)
+                } ?? false,
+                boundaryKernelChange: olderSessionNewest.map {
+                    kernelChanged(newer: oldest, older: $0)
+                } ?? false
+            )
+        }
+    }
+
+    /// Same kernel and uptime has not reset => same boot session.
+    private func isSameBoot(existingOldest: SystemInfoSnapshot, candidateOlder: SystemInfoSnapshot) -> Bool {
+        guard normalizedKernel(existingOldest.kernelVersion) == normalizedKernel(candidateOlder.kernelVersion) else {
+            return false
+        }
+
+        if let existingMinutes = uptimeMinutes(existingOldest.uptimeInfo),
+           let candidateMinutes = uptimeMinutes(candidateOlder.uptimeInfo) {
+            return existingMinutes + 5 >= candidateMinutes
+        }
+
+        // Missing uptime: only merge nearby records with the same kernel.
+        return abs(existingOldest.recordedAt.timeIntervalSince(candidateOlder.recordedAt)) <= 6 * 3600
+    }
+
+    private func historySessionHeader(_ session: HistoryBootSession) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: "power")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(t("开机会话", "Boot session"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                if session.boundaryReboot {
+                    historyEventChip(t("重启", "Reboot"), color: .orange)
+                }
+                if session.boundaryKernelChange {
+                    historyEventChip(t("内核升级", "Kernel"), color: .blue)
+                }
+
+                Spacer(minLength: 2)
+
+                Text("\(session.count) \(t("条", "records"))")
+                    .font(.system(size: 9))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: 5) {
+                Text(shortKernel(session.kernel))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+
+                Text("·")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+
+                Text("\(t("已运行", "Up for")) \(session.latestUptime.isEmpty ? "-" : session.latestUptime)")
+                    .font(.system(size: 9))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Text(sessionRangeLabel(session))
+                .font(.system(size: 9))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
         .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.top, 12)
+        .padding(.bottom, 2)
+    }
+
+    /// Actual record span, which stays truthful even when uptime and wall clock disagree.
+    private func sessionRangeLabel(_ session: HistoryBootSession) -> String {
+        let start = compactTimestamp(session.oldest.recordedAt)
+        if session.count == 1 {
+            return t("记录 ", "Recorded ") + start
+        }
+        let end = compactTimestamp(session.newest.recordedAt)
+        return t("记录 ", "Records ") + "\(start) – \(end)"
+    }
+
+    private func compactTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = preferences.language == .chinese
+            ? Locale(identifier: "zh_CN")
+            : Locale(identifier: "en_US")
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func compactDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = preferences.language == .chinese
+            ? Locale(identifier: "zh_CN")
+            : Locale(identifier: "en_US")
+        formatter.dateFormat = "yyyy/M/d"
+        return formatter.string(from: date)
+    }
+
+    // MARK: Session view
+
+    private func historySessionRow(
+        _ session: HistoryBootSession,
+        snapshot: SystemInfoSnapshot,
+        isFirst: Bool,
+        isLast: Bool
+    ) -> some View {
+        let globalIndex = session.snapshots.firstIndex(where: { $0.id == snapshot.id }) ?? 0
+        let older = globalIndex + 1 < session.snapshots.count
+            ? session.snapshots[globalIndex + 1]
+            : nil
+        let updateChange = older.map { updateChanged(newer: snapshot, older: $0) } ?? false
+
+        return HStack(alignment: .top, spacing: 8) {
+            historyRail(
+                isFirst: isFirst,
+                isLast: isLast,
+                dotColor: updateChange ? .green : Color.secondary.opacity(0.35)
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(sessionTimeLabel(session, snapshot: snapshot))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+
+                    if updateChange {
+                        historyEventChip(t("更新", "Update"), color: .green)
+                    }
+
+                    Spacer(minLength: 2)
+
+                    if snapshot.isManualEntry {
+                        historyEventChip(t("手填", "Manual"), color: .blue)
+                    }
+                    if snapshot.isEdited {
+                        historyEventChip(t("已编辑", "Edited"), color: .purple)
+                    }
+                }
+
+                historyField(
+                    title: t("最后更新", "Last update"),
+                    value: snapshot.updateInfo.isEmpty
+                        ? t("未检测到更新信息", "No update info detected")
+                        : snapshot.updateInfo
+                )
+
+                if session.count > 1,
+                   globalIndex > 0,
+                   !snapshot.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    historyField(title: t("运行", "Uptime"), value: snapshot.uptimeInfo)
+                }
+            }
+            .padding(.vertical, 9)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func sessionTimeLabel(_ session: HistoryBootSession, snapshot: SystemInfoSnapshot) -> String {
+        let spansDays = !Calendar.current.isDate(session.newest.recordedAt, inSameDayAs: session.oldest.recordedAt)
+        if spansDays {
+            return compactTimestamp(snapshot.recordedAt)
+        }
+        return snapshot.recordedAt.formatted(date: .omitted, time: .shortened)
+    }
+
+    // MARK: Time view
+
+    private func historyTimeDays() -> [HistoryTimeDay] {
+        let sorted = draft.systemInfoHistory.sorted { $0.recordedAt > $1.recordedAt }
+        var rows: [HistoryEventRow] = []
+
+        for index in sorted.indices {
+            let snapshot = sorted[index]
+            let older = index + 1 < sorted.count ? sorted[index + 1] : nil
+            rows.append(
+                HistoryEventRow(
+                    snapshot: snapshot,
+                    isReboot: older.map { isRebootDetected(newer: snapshot, older: $0) } ?? false,
+                    isKernelChange: older.map { kernelChanged(newer: snapshot, older: $0) } ?? false,
+                    isUpdateChange: older.map { updateChanged(newer: snapshot, older: $0) } ?? false,
+                    previousKernel: older?.kernelVersion
+                )
+            )
+        }
+
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: rows) {
+            calendar.startOfDay(for: $0.snapshot.recordedAt)
+        }
+
+        return grouped
+            .map { day, items in
+                HistoryTimeDay(
+                    id: day,
+                    rows: items.sorted { $0.snapshot.recordedAt > $1.snapshot.recordedAt }
+                )
+            }
+            .sorted { $0.id > $1.id }
+    }
+
+    private func historyTimeDayHeader(_ day: HistoryTimeDay) -> some View {
+        let span = (day.rows.first?.snapshot.recordedAt ?? .now)
+            .timeIntervalSince(day.rows.last?.snapshot.recordedAt ?? .now)
+        let spanMinutes = max(0, Int(span / 60))
+        let isShort = day.rows.count > 1 && span <= 90 * 60
+
+        return HStack(spacing: 5) {
+            Text(compactDay(day.id))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            if day.rows.count > 1 {
+                Text("\(day.rows.count) \(t("条", "records"))")
+                    .font(.system(size: 9))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+
+            if isShort {
+                historyEventChip(
+                    t("同一时段", "Same window") + " · \(shortSpanLabel(minutes: spanMinutes))",
+                    color: .secondary
+                )
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 2)
+    }
+
+    private func historyTimeRow(
+        _ row: HistoryEventRow,
+        isFirst: Bool,
+        isLast: Bool
+    ) -> some View {
+        let snapshot = row.snapshot
+        let dotColor: Color
+        if row.isReboot {
+            dotColor = .orange
+        } else if row.isKernelChange {
+            dotColor = .blue
+        } else if row.isUpdateChange {
+            dotColor = .green
+        } else {
+            dotColor = Color.secondary.opacity(0.35)
+        }
+
+        return HStack(alignment: .top, spacing: 8) {
+            historyRail(isFirst: isFirst, isLast: isLast, dotColor: dotColor)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(snapshot.recordedAt.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+
+                    if row.isReboot {
+                        historyEventChip(t("重启", "Reboot"), color: .orange)
+                    }
+                    if row.isKernelChange {
+                        historyEventChip(t("内核升级", "Kernel"), color: .blue)
+                    }
+                    if row.isUpdateChange {
+                        historyEventChip(t("更新", "Update"), color: .green)
+                    }
+
+                    Spacer(minLength: 2)
+
+                    if snapshot.isManualEntry {
+                        historyEventChip(t("手填", "Manual"), color: .blue)
+                    }
+                    if snapshot.isEdited {
+                        historyEventChip(t("已编辑", "Edited"), color: .purple)
+                    }
+                }
+
+                if row.isKernelChange, let previous = row.previousKernel, !previous.isEmpty {
+                    Text("\(shortKernel(previous)) → \(shortKernel(snapshot.kernelVersion))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if row.isReboot, let estimate = rebootEstimate(for: snapshot) {
+                    Label(estimate, systemImage: "arrow.clockwise")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange.opacity(0.9))
+                }
+
+                historyField(
+                    title: t("内核", "Kernel"),
+                    value: snapshot.kernelVersion.isEmpty ? "-" : snapshot.kernelVersion
+                )
+                historyField(
+                    title: t("最后更新", "Last update"),
+                    value: snapshot.updateInfo.isEmpty
+                        ? t("未检测到更新信息", "No update info detected")
+                        : snapshot.updateInfo
+                )
+
+                if !snapshot.uptimeInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    historyField(title: t("运行", "Uptime"), value: snapshot.uptimeInfo)
+                }
+            }
+            .padding(.vertical, 9)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func historyRail(isFirst: Bool, isLast: Bool, dotColor: Color) -> some View {
+        let railColor = Color.primary.opacity(0.08)
+
+        return VStack(spacing: 0) {
+            if isFirst {
+                Color.clear.frame(height: 14)
+            } else {
+                Rectangle()
+                    .fill(railColor)
+                    .frame(width: 1, height: 14)
+            }
+
+            Circle()
+                .fill(dotColor)
+                .frame(width: 6, height: 6)
+
+            if !isLast {
+                Rectangle()
+                    .fill(railColor)
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+            }
+        }
+        .frame(width: 6)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func shortSpanLabel(minutes: Int) -> String {
+        minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    private func rebootEstimate(for snapshot: SystemInfoSnapshot) -> String? {
+        guard let minutes = uptimeMinutes(snapshot.uptimeInfo),
+              minutes >= 0,
+              minutes <= 24 * 60 else {
+            return nil
+        }
+        let rebootDate = snapshot.recordedAt.addingTimeInterval(-Double(minutes * 60))
+        let time = rebootDate.formatted(date: .omitted, time: .shortened)
+        return t("约 \(time) 重启", "Rebooted around \(time)")
+    }
+
+    private func historyEventChip(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 8.5, weight: .semibold))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(color.opacity(0.12), in: Capsule())
+            .foregroundStyle(color.opacity(0.95))
     }
 
     private func historyField(title: String, value: String) -> some View {
@@ -1030,13 +1534,77 @@ struct ConnectionDetailView: View {
         }
     }
 
-    private func historyBadge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.12), in: Capsule())
-            .foregroundStyle(color.opacity(0.9))
+    // MARK: History relationship detection
+
+    private func isRebootDetected(newer: SystemInfoSnapshot, older: SystemInfoSnapshot) -> Bool {
+        guard let newerMinutes = uptimeMinutes(newer.uptimeInfo),
+              let olderMinutes = uptimeMinutes(older.uptimeInfo) else {
+            return false
+        }
+        if newerMinutes + 5 < olderMinutes { return true }
+        return newerMinutes <= 10 && olderMinutes > 30
+    }
+
+    private func kernelChanged(newer: SystemInfoSnapshot, older: SystemInfoSnapshot) -> Bool {
+        let newKernel = normalizedKernel(newer.kernelVersion)
+        let oldKernel = normalizedKernel(older.kernelVersion)
+        return !newKernel.isEmpty && !oldKernel.isEmpty && newKernel != oldKernel
+    }
+
+    private func updateChanged(newer: SystemInfoSnapshot, older: SystemInfoSnapshot) -> Bool {
+        if let newDate = newer.updateRecordedAt, let oldDate = older.updateRecordedAt {
+            return abs(newDate.timeIntervalSince(oldDate)) > 60
+        }
+        let newInfo = newer.updateInfo.trimmingCharacters(in: .whitespacesAndNewlines)
+        let oldInfo = older.updateInfo.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !newInfo.isEmpty && !oldInfo.isEmpty && newInfo != oldInfo
+    }
+
+    private func uptimeMinutes(_ text: String) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        var total = 0
+        var found = false
+
+        for token in trimmed.split(separator: " ") {
+            guard let unit = token.last, let value = Int(token.dropLast()) else { continue }
+            switch unit {
+            case "d":
+                total += value * 24 * 60
+                found = true
+            case "h":
+                total += value * 60
+                found = true
+            case "m":
+                total += value
+                found = true
+            default:
+                continue
+            }
+        }
+
+        return found ? total : nil
+    }
+
+    private func normalizedKernel(_ kernel: String) -> String {
+        kernel
+            .replacingOccurrences(of: "GNU/Linux", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func shortKernel(_ kernel: String) -> String {
+        var tokens = normalizedKernel(kernel)
+            .split(separator: " ")
+            .map(String.init)
+
+        if tokens.first == "Linux" {
+            tokens.removeFirst()
+        }
+        if tokens.first == "Darwin" {
+            return tokens.prefix(2).joined(separator: " ")
+        }
+        return tokens.first ?? kernel
     }
 
     private func refreshRemoteSystemInfo() {
